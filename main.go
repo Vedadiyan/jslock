@@ -12,7 +12,7 @@ type (
 		nc     *nats.Conn
 	}
 	Option       func(*JSLock)
-	UnLock       func() error
+	Release      func() error
 	UnSubscriber func() error
 )
 
@@ -58,15 +58,15 @@ func (jsLock *JSLock) Monitor(name string) (bool, error) {
 	return false, nil
 }
 
-func (jsLock *JSLock) Lock(name string) (UnLock, error) {
-	monitor, err := jsLock.Monitor(name)
+func (jsLock *JSLock) Lock(name string) (Release, error) {
+	ok, err := jsLock.Monitor(name)
 	if err != nil {
 		return nil, err
 	}
-	if !monitor {
+	if !ok {
 		return nil, nil
 	}
-	inbox, unsubscriber, err := jsLock.addReactiveMonitoring()
+	inbox, unsubscriber, err := jsLock.poll()
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (jsLock *JSLock) Lock(name string) (UnLock, error) {
 	}, nil
 }
 
-func (jsLock *JSLock) addReactiveMonitoring() (string, UnSubscriber, error) {
+func (jsLock *JSLock) poll() (string, UnSubscriber, error) {
 	value := ""
 	value = nats.NewInbox()
 	subs, err := jsLock.nc.Subscribe(value, func(msg *nats.Msg) {
@@ -98,6 +98,6 @@ func (jsLock *JSLock) unLock(name string, unsubscriber UnSubscriber) error {
 	return jsLock.locker.Delete(name)
 }
 
-func Acquired(unlock UnLock) bool {
-	return unlock != nil
+func Acquired(r Release) bool {
+	return r != nil
 }
