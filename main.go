@@ -8,20 +8,13 @@ import (
 
 type (
 	JSLock struct {
-		locker             nats.KeyValue
-		nc                 *nats.Conn
-		reactiveMonitoring bool
+		locker nats.KeyValue
+		nc     *nats.Conn
 	}
 	Option       func(*JSLock)
 	UnLock       func() error
 	UnSubscriber func() error
 )
-
-func WithReactiveMonitoring() Option {
-	return func(j *JSLock) {
-		j.reactiveMonitoring = true
-	}
-}
 
 func New(nc *nats.Conn, lockerName string, options ...Option) (*JSLock, error) {
 	js, err := nc.JetStream()
@@ -47,7 +40,7 @@ func New(nc *nats.Conn, lockerName string, options ...Option) (*JSLock, error) {
 	return &locker, nil
 }
 
-func (jsLock *JSLock) Monitor(name string, ttl time.Duration) (bool, error) {
+func (jsLock *JSLock) Monitor(name string) (bool, error) {
 	key, err := jsLock.locker.Get(name)
 	if err == nats.ErrKeyNotFound {
 		return true, nil
@@ -55,20 +48,15 @@ func (jsLock *JSLock) Monitor(name string, ttl time.Duration) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if time.Since(key.Created()).Nanoseconds() <= ttl.Nanoseconds() {
-		if jsLock.reactiveMonitoring {
-			_, err := jsLock.nc.Request(string(key.Value()), nil, time.Second*2)
-			if err != nil {
-				return true, jsLock.locker.Delete(name)
-			}
-		}
-		return false, nil
+	_, err = jsLock.nc.Request(string(key.Value()), nil, time.Second*2)
+	if err != nil {
+		return true, jsLock.locker.Delete(name)
 	}
-	return true, jsLock.locker.Delete(name)
+	return false, nil
 }
 
-func (jsLock *JSLock) Lock(name string, ttl time.Duration) (UnLock, error) {
-	monitor, err := jsLock.Monitor(name, ttl)
+func (jsLock *JSLock) Lock(name string) (UnLock, error) {
+	monitor, err := jsLock.Monitor(name)
 	if err != nil {
 		return nil, err
 	}
@@ -90,19 +78,16 @@ func (jsLock *JSLock) Lock(name string, ttl time.Duration) (UnLock, error) {
 
 func (jsLock *JSLock) addReactiveMonitoring() (string, UnSubscriber, error) {
 	value := ""
-	if jsLock.reactiveMonitoring {
-		value = nats.NewInbox()
-		subs, err := jsLock.nc.Subscribe(value, func(msg *nats.Msg) {
-			msg.RespondMsg(nats.NewMsg(msg.Reply))
-		})
-		if err != nil {
-			return value, func() error { return nil }, err
-		}
-		return value, func() error {
-			return subs.Unsubscribe()
-		}, nil
+	value = nats.NewInbox()
+	subs, err := jsLock.nc.Subscribe(value, func(msg *nats.Msg) {
+		msg.RespondMsg(nats.NewMsg(msg.Reply))
+	})
+	if err != nil {
+		return value, func() error { return nil }, err
 	}
-	return value, func() error { return nil }, nil
+	return value, func() error {
+		return subs.Unsubscribe()
+	}, nil
 }
 
 func (jsLock *JSLock) unLock(name string, unsubscriber UnSubscriber) error {
