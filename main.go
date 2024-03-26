@@ -49,8 +49,11 @@ func (jsLock *JSLock) Monitor(name string) (bool, error) {
 		return false, err
 	}
 	_, err = jsLock.nc.Request(string(key.Value()), nil, time.Second*2)
-	if err != nil {
+	if err == nats.ErrNoResponders {
 		return true, jsLock.locker.Delete(name)
+	}
+	if err != nil {
+		return false, err
 	}
 	return false, nil
 }
