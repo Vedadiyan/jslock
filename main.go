@@ -17,6 +17,12 @@ type (
 	UnSubscriber func() error
 )
 
+func WithReactiveMonitoring() Option {
+	return func(j *JSLock) {
+		j.reactiveMonitoring = true
+	}
+}
+
 func New(nc *nats.Conn, lockerName string, options ...Option) (*JSLock, error) {
 	js, err := nc.JetStream()
 	if err != nil {
@@ -34,6 +40,9 @@ func New(nc *nats.Conn, lockerName string, options ...Option) (*JSLock, error) {
 	locker := JSLock{
 		locker: keyValue,
 		nc:     nc,
+	}
+	for _, option := range options {
+		option(&locker)
 	}
 	return &locker, nil
 }
@@ -99,4 +108,8 @@ func (jsLock *JSLock) addReactiveMonitoring() (string, UnSubscriber, error) {
 func (jsLock *JSLock) unLock(name string, unsubscriber UnSubscriber) error {
 	unsubscriber()
 	return jsLock.locker.Delete(name)
+}
+
+func Acquired(unlock UnLock) bool {
+	return unlock != nil
 }
