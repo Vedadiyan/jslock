@@ -1,6 +1,7 @@
 package jslock
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -64,7 +65,7 @@ func (jsLock *JSLock) Lock(name string) (Release, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("lock is already in use")
 	}
 	inbox, unsubscriber, err := jsLock.poll()
 	if err != nil {
