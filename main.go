@@ -80,6 +80,29 @@ func (jsLock *JSLock) Lock(name string) (Release, error) {
 	}, nil
 }
 
+func (jsLock *JSLock) LockOnBehalf(name string, inbox string) (Release, error) {
+	ok, err := jsLock.Monitor(name)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("lock is already in use")
+	}
+	_, err = jsLock.locker.Create(name, []byte(inbox))
+	if err != nil {
+		return nil, err
+	}
+	return func() error {
+		return jsLock.unLock(name, func() error {
+			msg := nats.Msg{}
+			msg.Header = nats.Header{}
+			msg.Header.Set("cancel", "true")
+			msg.Subject = inbox
+			return jsLock.nc.PublishMsg(&msg)
+		})
+	}, nil
+}
+
 func (jsLock *JSLock) poll() (string, UnSubscriber, error) {
 	value := ""
 	value = nats.NewInbox()
