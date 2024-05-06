@@ -2,6 +2,7 @@ package jslock
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -16,6 +17,15 @@ type (
 	Release      func() error
 	UnSubscriber func() error
 )
+
+var (
+	inboxes map[string]UnSubscriber
+	rwMut   sync.RWMutex
+)
+
+func init() {
+	inboxes = make(map[string]UnSubscriber)
+}
 
 func New(nc *nats.Conn, lockerName string, options ...Option) (*JSLock, error) {
 	js, err := nc.JetStream()
@@ -67,11 +77,32 @@ func (jsLock *JSLock) Lock(name string) (Release, error) {
 	if !ok {
 		return nil, fmt.Errorf("lock is already in use")
 	}
-	inbox, unsubscriber, err := jsLock.poll()
+	inbox := jsLock.nc.NewInbox()
+	unsubscriber, err := jsLock.poll(name, inbox)
 	if err != nil {
 		return nil, err
 	}
 	_, err = jsLock.locker.Create(name, []byte(inbox))
+	if err != nil {
+		return nil, err
+	}
+	return func() error {
+		return jsLock.unLock(name, unsubscriber)
+	}, nil
+}
+
+func (jsLock *JSLock) PassOwnership(name string, inbox string) (Release, error) {
+	rwMut.RLock()
+	current, ok := inboxes[name]
+	rwMut.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("lock not found")
+	}
+	err := current()
+	if err != nil {
+		return nil, err
+	}
+	unsubscriber, err := jsLock.poll(name, inbox)
 	if err != nil {
 		return nil, err
 	}
@@ -103,18 +134,23 @@ func (jsLock *JSLock) LockOnBehalf(name string, inbox string) (Release, error) {
 	}, nil
 }
 
-func (jsLock *JSLock) poll() (string, UnSubscriber, error) {
-	value := ""
-	value = nats.NewInbox()
-	subs, err := jsLock.nc.Subscribe(value, func(msg *nats.Msg) {
+func (jsLock *JSLock) poll(name string, inbox string) (UnSubscriber, error) {
+	subs, err := jsLock.nc.Subscribe(inbox, func(msg *nats.Msg) {
 		msg.RespondMsg(nats.NewMsg(msg.Reply))
 	})
 	if err != nil {
-		return value, func() error { return nil }, err
+		return func() error { return nil }, err
 	}
-	return value, func() error {
+	unsubscriber := func() error {
+		rwMut.Lock()
+		delete(inboxes, name)
+		rwMut.Unlock()
 		return subs.Unsubscribe()
-	}, nil
+	}
+	rwMut.Lock()
+	inboxes[name] = unsubscriber
+	rwMut.Unlock()
+	return unsubscriber, nil
 }
 
 func (jsLock *JSLock) unLock(name string, unsubscriber UnSubscriber) error {
