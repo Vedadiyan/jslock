@@ -59,7 +59,8 @@ func (jsLock *JSLock) Monitor(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = jsLock.nc.Request(string(key.Value()), nil, time.Second*2)
+	value := string(key.Value())
+	_, err = jsLock.nc.Request(value, nil, time.Second*2)
 	if err == nats.ErrNoResponders {
 		return true, jsLock.locker.Delete(name)
 	}
@@ -102,19 +103,11 @@ func (jsLock *JSLock) ChangeOwnership(name string, remote string, release Releas
 	if err != nil {
 		return release, err
 	}
-
-	inbox := jsLock.nc.NewInbox()
-
-	msg := nats.Msg{}
-	msg.Header = nats.Header{}
-	msg.Header.Set("inbox", inbox)
-	msg.Subject = remote
-
-	err = jsLock.nc.PublishMsg(&msg)
+	err = jsLock.locker.Delete(name)
 	if err != nil {
 		return release, err
 	}
-	_, err = jsLock.locker.Create(name, []byte(inbox))
+	_, err = jsLock.locker.Create(name, []byte(remote))
 	if err != nil {
 		return release, err
 	}
@@ -126,7 +119,7 @@ func (jsLock *JSLock) ChangeOwnership(name string, remote string, release Releas
 		msg := nats.Msg{}
 		msg.Header = nats.Header{}
 		msg.Header.Set("cmd", "release")
-		msg.Subject = inbox
+		msg.Subject = remote
 
 		err = jsLock.nc.PublishMsg(&msg)
 		if err != nil {
