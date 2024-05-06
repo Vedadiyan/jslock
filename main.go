@@ -91,7 +91,7 @@ func (jsLock *JSLock) Lock(name string) (Release, error) {
 	}, nil
 }
 
-func (jsLock *JSLock) ChangeOwnership(name string, inbox string) (Release, error) {
+func (jsLock *JSLock) ChangeOwnership(name string, remote string) (Release, error) {
 	rwMut.RLock()
 	current, ok := inboxes[name]
 	rwMut.RUnlock()
@@ -102,12 +102,27 @@ func (jsLock *JSLock) ChangeOwnership(name string, inbox string) (Release, error
 	if err != nil {
 		return nil, err
 	}
-	unsubscriber, err := jsLock.poll(name, inbox)
+
+	inbox := jsLock.nc.NewInbox()
+
+	msg := nats.Msg{}
+	msg.Header = nats.Header{}
+	msg.Header.Set("inbox", inbox)
+	msg.Subject = remote
+
+	err = jsLock.nc.PublishMsg(&msg)
+	if err != nil {
+		return nil, err
+	}
+	_, err = jsLock.locker.Create(name, []byte(inbox))
 	if err != nil {
 		return nil, err
 	}
 	return func() error {
-		return jsLock.unLock(name, unsubscriber)
+		rwMut.Lock()
+		delete(inboxes, name)
+		rwMut.Unlock()
+		return nil
 	}, nil
 }
 
