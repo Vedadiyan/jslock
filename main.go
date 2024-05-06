@@ -122,6 +122,16 @@ func (jsLock *JSLock) ChangeOwnership(name string, remote string) (Release, erro
 		rwMut.Lock()
 		delete(inboxes, name)
 		rwMut.Unlock()
+
+		msg := nats.Msg{}
+		msg.Header = nats.Header{}
+		msg.Header.Set("cmd", "release")
+		msg.Subject = inbox
+
+		err = jsLock.nc.PublishMsg(&msg)
+		if err != nil {
+			return err
+		}
 		return nil
 	}, nil
 }
