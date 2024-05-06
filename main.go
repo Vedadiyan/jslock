@@ -91,7 +91,7 @@ func (jsLock *JSLock) Lock(name string) (Release, error) {
 	}, nil
 }
 
-func (jsLock *JSLock) PassOwnership(name string, inbox string) (Release, error) {
+func (jsLock *JSLock) ChangeOwnership(name string, inbox string) (Release, error) {
 	rwMut.RLock()
 	current, ok := inboxes[name]
 	rwMut.RUnlock()
